@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --rawr-purple: #7C3AED;
+  --rawr-pink: #EC4899;
+  --rawr-dark: #0F0A1A;
+  --rawr-card: #1A1225;
+}
+
+body {
+  background: var(--rawr-dark);
+  color: white;
+  font-family: system-ui, -apple-system, sans-serif;
+  overscroll-behavior: none;
+}
+
+.thought-bubble {
+  position: relative;
+  background: rgba(124, 58, 237, 0.9);
+  backdrop-filter: blur(10px);
+  border-radius: 20px;
+  padding: 16px 20px;
+  max-width: 280px;
+  animation: float 3s ease-in-out infinite;
+}
+
+.thought-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -20px;
+  left: 30px;
+  width: 0;
+  height: 0;
+  border-left: 15px solid transparent;
+  border-right: 15px solid transparent;
+  border-top: 20px solid rgba(124, 58, 237, 0.9);
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(124, 58, 237, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(124, 58, 237, 0.6); }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.quiz-option {
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.quiz-option:active {
+  transform: scale(0.97);
+}
+
+@keyframes scan {
+  0% { top: 20px; }
+  50% { top: calc(100% - 24px); }
+  100% { top: 20px; }
+}
+
+.scan-line {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--rawr-purple), var(--rawr-pink), transparent);
+  z-index: 11;
+  animation: scan 2.5s ease-in-out infinite;
+}
+
+.msg-user {
+  background: linear-gradient(135deg, var(--rawr-purple), var(--rawr-pink));
+  border-radius: 20px 20px 4px 20px;
+}
+
+.msg-pet {
+  background: var(--rawr-card);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  border-radius: 20px 20px 20px 4px;
+}
