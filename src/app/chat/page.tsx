@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { getPet, type PetData } from '@/lib/client-store';
 
 interface Message {
   role: 'user' | 'pet';
@@ -14,27 +15,42 @@ function ChatContent() {
   const router = useRouter();
   const petId = searchParams.get('petId');
 
+  const [pet, setPet] = useState<PetData | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [petName, setPetName] = useState('Pet');
   const [isListening, setIsListening] = useState(false);
+  const [error, setError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const hasSentGreeting = useRef(false);
+
+  // Load pet from localStorage
+  useEffect(() => {
+    if (petId) {
+      const petData = getPet(petId);
+      if (petData) {
+        setPet(petData);
+      } else {
+        setError('Pet not found. It may have been lost — try scanning again.');
+      }
+    }
+  }, [petId]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Send the first greeting
+  // Send the first greeting once pet is loaded
   useEffect(() => {
-    if (petId) {
+    if (pet && !hasSentGreeting.current) {
+      hasSentGreeting.current = true;
       sendMessage("Hey! What's up?", true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [petId]);
+  }, [pet]);
 
   const playVoice = async (text: string, voiceId: string, messageIndex: number) => {
     try {
@@ -64,7 +80,7 @@ function ChatContent() {
       } else {
         // Fallback to browser TTS
         const data = await res.json();
-        if (data.fallback) {
+        if (data.fallback && typeof speechSynthesis !== 'undefined') {
           const utterance = new SpeechSynthesisUtterance(text);
           utterance.rate = 0.9;
           utterance.pitch = 1.1;
@@ -73,14 +89,16 @@ function ChatContent() {
       }
     } catch {
       // Silent fallback to browser TTS
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      speechSynthesis.speak(utterance);
+      if (typeof speechSynthesis !== 'undefined') {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.9;
+        speechSynthesis.speak(utterance);
+      }
     }
   };
 
   const sendMessage = async (text: string, isGreeting = false) => {
-    if (!petId || (!text.trim() && !isGreeting)) return;
+    if (!pet || (!text.trim() && !isGreeting)) return;
 
     const userMessage: Message = { role: 'user', content: text };
     if (!isGreeting) {
@@ -88,13 +106,36 @@ function ChatContent() {
     }
     setInput('');
     setIsLoading(true);
+    setError('');
+
+    // Build history for the API (excluding isPlaying metadata)
+    const currentMessages = isGreeting ? [] : [...messages, userMessage];
+    const history = currentMessages.map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content,
+    }));
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ petId, message: text }),
+        body: JSON.stringify({
+          pet: {
+            name: pet.name,
+            species: pet.species,
+            breed: pet.breed,
+            systemPrompt: pet.systemPrompt,
+            voiceId: pet.voiceId,
+          },
+          message: text,
+          history,
+        }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error (${res.status})`);
+      }
 
       const data = await res.json();
 
@@ -102,22 +143,23 @@ function ChatContent() {
         const petMessage: Message = { role: 'pet', content: data.response };
         setMessages(prev => {
           const newMessages = isGreeting ? [petMessage] : [...prev, petMessage];
-          // Play voice for the new message
           const idx = newMessages.length - 1;
           playVoice(data.response, data.voiceId, idx);
           return newMessages;
         });
-
-        // Extract pet name from response context
-        if (isGreeting && data.response) {
-          setPetName(data.response.split(' ')[0] === "I'm" ? data.response.split("I'm ")[1]?.split(/[,.!]/)[0] || 'Pet' : 'Pet');
-        }
+      } else if (data.error) {
+        throw new Error(data.error);
       }
-    } catch {
-      setMessages(prev => [
-        ...prev,
-        { role: 'pet', content: "* scratches ear * Sorry, I got distracted. What were you saying?" },
-      ]);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Something went wrong';
+      if (errMsg.includes('Spend cap')) {
+        setError(errMsg);
+      } else {
+        setMessages(prev => [
+          ...prev,
+          { role: 'pet', content: "* scratches ear * Sorry, I got distracted. What were you saying?" },
+        ]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -131,10 +173,12 @@ function ChatContent() {
       return;
     }
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+    const SpeechRecognitionAPI = typeof window !== 'undefined'
+      ? (window.SpeechRecognition || window.webkitSpeechRecognition)
+      : null;
+    if (!SpeechRecognitionAPI) return;
 
-    const recognition = new SpeechRecognition();
+    const recognition = new SpeechRecognitionAPI();
     recognition.continuous = false;
     recognition.interimResults = false;
 
@@ -160,15 +204,38 @@ function ChatContent() {
     );
   }
 
+  if (!pet && !error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!pet && error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
+        <div className="text-5xl mb-4">😿</div>
+        <p className="text-gray-400 mb-4">{error}</p>
+        <button
+          onClick={() => router.push('/onboarding')}
+          className="py-3 px-6 bg-gradient-to-r from-purple-600 to-pink-600 rounded-2xl font-bold text-white"
+        >
+          Scan a Pet
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[var(--rawr-dark)]">
       {/* Header */}
       <div className="p-4 flex items-center justify-between border-b border-gray-800 bg-[var(--rawr-dark)]/80 backdrop-blur-sm sticky top-0 z-20">
         <button onClick={() => router.push('/')} className="text-gray-400 text-sm">
-          ← Back
+          &larr; Back
         </button>
         <div className="text-center">
-          <span className="text-white font-bold">{petName}</span>
+          <span className="text-white font-bold">{pet?.name || 'Pet'}</span>
           <div className="flex items-center justify-center gap-1">
             <div className="w-2 h-2 rounded-full bg-green-500" />
             <span className="text-green-400 text-xs">talking</span>
@@ -176,6 +243,12 @@ function ChatContent() {
         </div>
         <div className="w-12" />
       </div>
+
+      {error && (
+        <div className="mx-4 mt-2 p-3 bg-red-500/20 border border-red-500/30 rounded-xl text-red-300 text-sm text-center">
+          {error}
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">

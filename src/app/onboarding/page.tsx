@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { savePet } from '@/lib/client-store';
 
 const QUIZ_QUESTIONS = [
   {
@@ -32,6 +33,14 @@ const QUIZ_QUESTIONS = [
 
 type Step = 'camera' | 'scanning' | 'quiz' | 'generating' | 'result';
 
+interface PetResult {
+  petId: string;
+  name: string;
+  personality: Record<string, string>;
+  systemPrompt: string;
+  voiceId: string;
+}
+
 export default function Onboarding() {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -43,7 +52,7 @@ export default function Onboarding() {
   const [avatarDataUrl, setAvatarDataUrl] = useState<string>('');
   const [quizStep, setQuizStep] = useState(0);
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<{ petId: string; name: string; personality: Record<string, string> } | null>(null);
+  const [result, setResult] = useState<PetResult | null>(null);
   const [error, setError] = useState('');
 
   // Start camera
@@ -83,6 +92,7 @@ export default function Onboarding() {
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
     setAvatarDataUrl(dataUrl);
     setStep('scanning');
+    setError('');
 
     try {
       const res = await fetch('/api/identify', {
@@ -90,6 +100,11 @@ export default function Onboarding() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageBase64: dataUrl }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error (${res.status})`);
+      }
 
       const data = await res.json();
 
@@ -101,8 +116,8 @@ export default function Onboarding() {
 
       setPetInfo(data);
       setStep('quiz');
-    } catch {
-      setError('Failed to scan. Try again!');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to scan. Try again!');
       setStep('camera');
     }
   };
@@ -118,6 +133,7 @@ export default function Onboarding() {
     } else {
       // Generate personality
       setStep('generating');
+      setError('');
 
       try {
         const res = await fetch('/api/personality', {
@@ -128,27 +144,48 @@ export default function Onboarding() {
             breed: petInfo?.breed,
             traits: petInfo?.traits,
             quizAnswers: newAnswers,
-            avatarDataUrl,
           }),
         });
 
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Server error (${res.status})`);
+        }
+
         const data = await res.json();
+
+        if (!data.petId || !data.name) {
+          throw new Error('Invalid response from personality generator');
+        }
+
+        // Save pet to localStorage for chat page
+        savePet({
+          id: data.petId,
+          name: data.name,
+          species: petInfo?.species || '',
+          breed: petInfo?.breed || '',
+          traits: petInfo?.traits || [],
+          personality: data.personality,
+          systemPrompt: data.systemPrompt,
+          voiceId: data.voiceId,
+          avatarDataUrl,
+        });
+
         setResult(data);
         setStep('result');
-      } catch {
-        setError('Failed to generate personality. Try again!');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to generate personality. Try again!');
         setStep('quiz');
       }
     }
   };
 
-  // Render based on step
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
       <div className="p-4 flex items-center justify-between z-20 relative">
         <button onClick={() => router.push('/')} className="text-gray-400 text-sm">
-          ← Back
+          &larr; Back
         </button>
         <span className="text-purple-400 font-bold text-sm">RAWR</span>
         <div className="w-12" />
@@ -199,10 +236,9 @@ export default function Onboarding() {
       {/* QUIZ STEP */}
       {step === 'quiz' && (
         <div className="flex-1 flex flex-col items-center justify-center p-6">
-          {/* Pet identified banner */}
           <div className="mb-8 text-center animate-fade-in-up">
             <div className="text-4xl mb-2">
-              {petInfo?.species === 'cat' ? '🐱' : petInfo?.species === 'bird' ? '🐦' : '🐕'}
+              {petInfo?.species === 'cat' ? '\uD83D\uDC31' : petInfo?.species === 'bird' ? '\uD83D\uDC26' : '\uD83D\uDC15'}
             </div>
             <p className="text-purple-300 font-medium">
               {petInfo?.breed} {petInfo?.species} detected!
@@ -212,7 +248,6 @@ export default function Onboarding() {
             </p>
           </div>
 
-          {/* Progress */}
           <div className="flex gap-2 mb-8">
             {QUIZ_QUESTIONS.map((_, i) => (
               <div
@@ -224,7 +259,6 @@ export default function Onboarding() {
             ))}
           </div>
 
-          {/* Question */}
           <div className="w-full max-w-sm animate-fade-in-up" key={quizStep}>
             <h2 className="text-xl font-bold text-center mb-8">
               {QUIZ_QUESTIONS[quizStep].question}
@@ -264,7 +298,7 @@ export default function Onboarding() {
       {step === 'result' && result && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in-up">
           <div className="text-6xl mb-4">
-            {petInfo?.species === 'cat' ? '🐱' : petInfo?.species === 'bird' ? '🐦' : '🐕'}
+            {petInfo?.species === 'cat' ? '\uD83D\uDC31' : petInfo?.species === 'bird' ? '\uD83D\uDC26' : '\uD83D\uDC15'}
           </div>
           <h2 className="text-3xl font-black bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent mb-2">
             {result.name}
@@ -273,7 +307,6 @@ export default function Onboarding() {
             {petInfo?.breed} {petInfo?.species}
           </p>
 
-          {/* Personality axes */}
           <div className="w-full max-w-xs space-y-3 mb-8">
             {Object.entries(result.personality).map(([axis, value]) => (
               <div key={axis} className="flex items-center justify-between">

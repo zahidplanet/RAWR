@@ -1,7 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildPersonalityPrompt, pickVoice } from '@/lib/prompts';
-import { store } from '@/lib/store';
 import { spend } from '@/lib/spend';
 
 const anthropic = new Anthropic();
@@ -11,7 +10,8 @@ export async function POST(req: NextRequest) {
     if (!spend.record('personality')) {
       return NextResponse.json({ error: 'Spend cap reached ($10 testing limit). Redeploy to reset.' }, { status: 429 });
     }
-    const { species, breed, traits, quizAnswers, avatarDataUrl } = await req.json();
+
+    const { species, breed, traits, quizAnswers } = await req.json();
 
     const prompt = buildPersonalityPrompt(species, breed, traits, quizAnswers);
 
@@ -25,9 +25,11 @@ export async function POST(req: NextRequest) {
     const result = JSON.parse(text);
 
     const voiceId = pickVoice(result.personality);
+    const petId = crypto.randomUUID();
 
-    const pet = {
-      id: crypto.randomUUID(),
+    // Return everything the client needs to store locally
+    return NextResponse.json({
+      petId,
       name: result.name,
       species,
       breed,
@@ -35,15 +37,6 @@ export async function POST(req: NextRequest) {
       personality: result.personality,
       systemPrompt: result.systemPrompt,
       voiceId,
-      avatarDataUrl,
-    };
-
-    store.addPet(pet);
-
-    return NextResponse.json({
-      petId: pet.id,
-      name: pet.name,
-      personality: pet.personality,
       voiceDescription: result.voiceDescription,
     });
   } catch (error) {

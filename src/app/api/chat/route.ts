@@ -1,7 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildChatSystemPrompt } from '@/lib/prompts';
-import { store } from '@/lib/store';
 import { spend } from '@/lib/spend';
 
 const anthropic = new Anthropic();
@@ -11,35 +10,36 @@ export async function POST(req: NextRequest) {
     if (!spend.record('chat')) {
       return NextResponse.json({ error: 'Spend cap reached ($10 testing limit). Redeploy to reset.' }, { status: 429 });
     }
-    const { petId, message } = await req.json();
 
-    const pet = store.getPet(petId);
-    if (!pet) {
-      return NextResponse.json({ error: 'Pet not found' }, { status: 404 });
+    const { pet, message, history } = await req.json();
+
+    if (!pet || !pet.name || !pet.systemPrompt) {
+      return NextResponse.json({ error: 'Pet data required' }, { status: 400 });
     }
 
-    // Add user message
-    store.addMessage(petId, { role: 'user', content: message });
-
-    // Get conversation history (last 10 messages for token efficiency)
-    const history = store.getMessages(petId).slice(-10);
+    if (!message) {
+      return NextResponse.json({ error: 'Message required' }, { status: 400 });
+    }
 
     const systemPrompt = buildChatSystemPrompt(pet);
+
+    // Use history from client (last 10 messages for token efficiency)
+    const messages = (history || []).slice(-10).map((m: { role: string; content: string }) => ({
+      role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+      content: m.content,
+    }));
+
+    // Add current user message
+    messages.push({ role: 'user' as const, content: message });
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 300,
       system: systemPrompt,
-      messages: history.map(m => ({
-        role: m.role === 'user' ? 'user' as const : 'assistant' as const,
-        content: m.content,
-      })),
+      messages,
     });
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
-
-    // Add pet response
-    store.addMessage(petId, { role: 'assistant', content: text });
 
     return NextResponse.json({
       response: text,
