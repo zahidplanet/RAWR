@@ -2,11 +2,15 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildPersonalityPrompt, pickVoice } from '@/lib/prompts';
 import { store } from '@/lib/store';
+import { spend } from '@/lib/spend';
 
 const anthropic = new Anthropic();
 
 export async function POST(req: NextRequest) {
   try {
+    if (!spend.record('personality')) {
+      return NextResponse.json({ error: 'Spend cap reached ($10 testing limit). Redeploy to reset.' }, { status: 429 });
+    }
     const { species, breed, traits, quizAnswers, avatarDataUrl } = await req.json();
 
     const prompt = buildPersonalityPrompt(species, breed, traits, quizAnswers);

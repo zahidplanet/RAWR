@@ -2,11 +2,15 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildChatSystemPrompt } from '@/lib/prompts';
 import { store } from '@/lib/store';
+import { spend } from '@/lib/spend';
 
 const anthropic = new Anthropic();
 
 export async function POST(req: NextRequest) {
   try {
+    if (!spend.record('chat')) {
+      return NextResponse.json({ error: 'Spend cap reached ($10 testing limit). Redeploy to reset.' }, { status: 429 });
+    }
     const { petId, message } = await req.json();
 
     const pet = store.getPet(petId);

@@ -1,10 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
+import { spend } from '@/lib/spend';
 
 const anthropic = new Anthropic();
 
 export async function POST(req: NextRequest) {
   try {
+    if (!spend.record('identify')) {
+      return NextResponse.json({ error: 'Spend cap reached ($10 testing limit). Redeploy to reset.' }, { status: 429 });
+    }
     const { imageBase64 } = await req.json();
 
     if (!imageBase64) {

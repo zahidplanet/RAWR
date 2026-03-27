@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { spend } from '@/lib/spend';
 
 export async function POST(req: NextRequest) {
   try {
+    if (!spend.record('voice')) {
+      return NextResponse.json({ fallback: true, text: 'Spend cap reached' });
+    }
     const { text, voiceId } = await req.json();
 
     const apiKey = process.env.ELEVENLABS_API_KEY;
